@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phone Cleaner</string>
+    <string name="no_files_found">No files found</string>
+</resources>

@@ -1,0 +1,232 @@
+package com.phonecleaner
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.View
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.tabs.TabLayout
+import com.phonecleaner.adapter.MediaAdapter
+import com.phonecleaner.databinding.ActivityMainBinding
+import com.phonecleaner.model.MediaFile
+import com.phonecleaner.utils.FileScanner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var fileScanner: FileScanner
+    private var currentFiles: List<MediaFile> = emptyList()
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.READ_MEDIA_IMAGES] == true &&
+                    permissions[Manifest.permission.READ_MEDIA_VIDEO] == true
+        } else {
+            permissions[Manifest.permission.READ_EXTERNAL_STORAGE] == true &&
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                        permissions[Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED] ?: false
+                    else true
+        }
+        if (granted) {
+            loadFiles("all")
+        } else {
+            Toast.makeText(this, "Storage permission required", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        fileScanner = FileScanner(contentResolver)
+
+        checkPermissionsAndLoad()
+
+        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                exitSelectionMode()
+                when (tab?.text) {
+                    "All" -> loadFiles("all")
+                    "GIFs" -> loadFiles("gifs")
+                    "Photos" -> loadFiles("photos")
+                    "Videos" -> loadFiles("videos")
+                }
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) {}
+            override fun onTabReselected(tab: TabLayout.Tab?) {}
+        })
+
+        binding.buttonDeleteSelected.setOnClickListener {
+            val adapter = binding.recyclerView.adapter as? MediaAdapter
+            if (adapter != null && adapter.hasSelection()) {
+                deleteSelectedFiles()
+            } else {
+                if (currentFiles.isNotEmpty()) {
+                    adapter?.toggleSelectionMode()
+                    updateSelectionUI(adapter)
+                }
+            }
+        }
+    }
+
+    private fun updateSelectionUI(adapter: MediaAdapter?) {
+        if (adapter != null && adapter.isSelectionMode) {
+            binding.buttonDeleteSelected.text = if (adapter.hasSelection()) {
+                "Delete (${adapter.getSelectedFiles().size})"
+            } else {
+                "Cancel"
+            }
+        } else {
+            binding.buttonDeleteSelected.text = "Select"
+        }
+    }
+
+    private fun exitSelectionMode() {
+        (binding.recyclerView.adapter as? MediaAdapter)?.let {
+            if (it.isSelectionMode) {
+                it.clearSelection()
+                it.toggleSelectionMode()
+                updateSelectionUI(it)
+            }
+        }
+    }
+
+    private fun checkPermissionsAndLoad() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        } else {
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+
+        val allGranted = permissions.all {
+            checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (allGranted) {
+            loadFiles("all")
+        } else {
+            permissionLauncher.launch(permissions)
+        }
+    }
+
+    private fun loadFiles(filter: String) {
+        lifecycleScope.launch {
+            binding.progressBar.visibility = View.VISIBLE
+            binding.recyclerView.visibility = View.GONE
+            binding.textViewEmpty.visibility = View.GONE
+
+            val files = withContext(Dispatchers.IO) {
+                when (filter) {
+                    "gifs" -> fileScanner.scanGifs()
+                    else -> fileScanner.scanAllFiles().let { all ->
+                        when (filter) {
+                            "photos" -> all.filter { !it.isGif && !it.mimeType.startsWith("video") }
+                            "videos" -> all.filter { it.mimeType.startsWith("video") }
+                            else -> all
+                        }
+                    }
+                }
+            }
+
+            currentFiles = files
+            binding.progressBar.visibility = View.GONE
+
+            if (files.isEmpty()) {
+                binding.textViewEmpty.visibility = View.VISIBLE
+                binding.recyclerView.visibility = View.GONE
+            } else {
+                binding.textViewEmpty.visibility = View.GONE
+                binding.recyclerView.visibility = View.VISIBLE
+                val adapter = MediaAdapter(files) { file ->
+                    deleteFile(file)
+                } { hasSelection ->
+                    binding.buttonDeleteSelected.text = when {
+                        hasSelection && adapter.isSelectionMode -> "Delete (${adapter.getSelectedFiles().size})"
+                        adapter.isSelectionMode -> "Cancel"
+                        else -> "Select"
+                    }
+                }
+                binding.recyclerView.adapter = adapter
+                updateSelectionUI(adapter)
+            }
+        }
+    }
+
+    private fun deleteFile(file: MediaFile) {
+        lifecycleScope.launch {
+            val deleted = withContext(Dispatchers.IO) {
+                try {
+                    val rows = contentResolver.delete(file.uri, null, null)
+                    rows > 0
+                } catch (e: Exception) {
+                    false
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (deleted) {
+                    Toast.makeText(this@MainActivity, "Deleted: ${file.displayName}", Toast.LENGTH_SHORT).show()
+                    val currentTab = binding.tabLayout.selectedTabPosition
+                    val filter = when (currentTab) {
+                        1 -> "gifs"
+                        2 -> "photos"
+                        3 -> "videos"
+                        else -> "all"
+                    }
+                    loadFiles(filter)
+                } else {
+                    Toast.makeText(this@MainActivity, "Failed to delete", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun deleteSelectedFiles() {
+        val adapter = binding.recyclerView.adapter as? MediaAdapter ?: return
+        val selected = adapter.getSelectedFiles()
+        if (selected.isEmpty()) return
+
+        lifecycleScope.launch {
+            var deletedCount = 0
+            withContext(Dispatchers.IO) {
+                selected.forEach { file ->
+                    try {
+                        if (contentResolver.delete(file.uri, null, null) > 0) {
+                            deletedCount++
+                        }
+                    } catch (e: Exception) {
+                        // failed
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Deleted $deletedCount file(s)",
+                    Toast.LENGTH_SHORT
+                ).show()
+                adapter.toggleSelectionMode()
+                loadFiles("all")
+            }
+        }
+    }
+}
