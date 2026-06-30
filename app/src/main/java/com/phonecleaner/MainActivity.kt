@@ -27,13 +27,10 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions[Manifest.permission.READ_MEDIA_IMAGES] == true &&
-                    permissions[Manifest.permission.READ_MEDIA_VIDEO] == true
+            permissions.getOrDefault(Manifest.permission.READ_MEDIA_IMAGES, false) &&
+                    permissions.getOrDefault(Manifest.permission.READ_MEDIA_VIDEO, false)
         } else {
-            permissions[Manifest.permission.READ_EXTERNAL_STORAGE] == true &&
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                        permissions[Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED] ?: false
-                    else true
+            permissions.getOrDefault(Manifest.permission.READ_EXTERNAL_STORAGE, false)
         }
         if (granted) {
             loadFiles("all")
@@ -49,8 +46,28 @@ class MainActivity : AppCompatActivity() {
 
         fileScanner = FileScanner(contentResolver)
 
+        setupTabs()
+
         checkPermissionsAndLoad()
 
+        binding.buttonDeleteSelected.setOnClickListener {
+            val adapter = binding.recyclerView.adapter as? MediaAdapter
+            if (adapter != null && adapter.hasSelection()) {
+                deleteSelectedFiles()
+            } else {
+                if (currentFiles.isNotEmpty()) {
+                    adapter?.toggleSelectionMode()
+                    updateSelectionUI(adapter)
+                }
+            }
+        }
+    }
+
+    private fun setupTabs() {
+        val tabs = listOf("All", "GIFs", "Photos", "Videos")
+        tabs.forEach { title ->
+            binding.tabLayout.addTab(binding.tabLayout.newTab().setText(title))
+        }
         binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab?) {
                 exitSelectionMode()
@@ -65,18 +82,6 @@ class MainActivity : AppCompatActivity() {
             override fun onTabUnselected(tab: TabLayout.Tab?) {}
             override fun onTabReselected(tab: TabLayout.Tab?) {}
         })
-
-        binding.buttonDeleteSelected.setOnClickListener {
-            val adapter = binding.recyclerView.adapter as? MediaAdapter
-            if (adapter != null && adapter.hasSelection()) {
-                deleteSelectedFiles()
-            } else {
-                if (currentFiles.isNotEmpty()) {
-                    adapter?.toggleSelectionMode()
-                    updateSelectionUI(adapter)
-                }
-            }
-        }
     }
 
     private fun updateSelectionUI(adapter: MediaAdapter?) {
