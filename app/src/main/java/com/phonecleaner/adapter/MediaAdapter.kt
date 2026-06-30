@@ -1,6 +1,11 @@
 package com.phonecleaner.adapter
 
 import android.content.ContentResolver
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
@@ -103,7 +108,16 @@ class MediaAdapter(
     private fun loadThumbnail(file: MediaFile, target: ImageView, fallbackIcon: Int) {
         CoroutineScope(Dispatchers.IO).launch {
             val bitmap = try {
-                contentResolver.loadThumbnail(file.uri, Size(256, 256), null)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    contentResolver.loadThumbnail(file.uri, Size(256, 256), null)
+                } else {
+                    MediaStore.Images.Thumbnails.getThumbnail(
+                        contentResolver,
+                        file.id,
+                        MediaStore.Images.Thumbnails.MINI_KIND,
+                        null
+                    )
+                }
             } catch (_: Exception) {
                 null
             }
