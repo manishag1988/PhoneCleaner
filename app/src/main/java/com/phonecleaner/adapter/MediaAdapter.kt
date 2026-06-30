@@ -1,9 +1,6 @@
 package com.phonecleaner.adapter
 
 import android.content.ContentResolver
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
@@ -94,9 +91,28 @@ class MediaAdapter(
             }
 
             binding.root.setOnClickListener {
-                if (!isSelectionMode) {
+                if (isSelectionMode) {
+                    val isSelected = selectedItems.contains(file.id)
+                    if (isSelected) {
+                        selectedItems.remove(file.id)
+                    } else {
+                        selectedItems.add(file.id)
+                    }
+                    onSelectionChanged(selectedItems.isNotEmpty())
+                    notifyItemChanged(bindingAdapterPosition)
+                } else {
                     onPreviewClick(file)
                 }
+            }
+
+            binding.root.setOnLongClickListener {
+                if (!isSelectionMode) {
+                    isSelectionMode = true
+                    selectedItems.add(file.id)
+                    onSelectionChanged(true)
+                    notifyDataSetChanged()
+                }
+                true
             }
 
             binding.buttonDelete.setOnClickListener {

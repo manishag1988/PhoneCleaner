@@ -83,6 +83,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        binding.buttonDeleteSelected.setOnLongClickListener {
+            val adapter = binding.recyclerView.adapter as? MediaAdapter
+            if (adapter != null && currentFiles.isNotEmpty()) {
+                adapter.selectAll()
+                updateSelectionUI(adapter)
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun setupTabs() {
