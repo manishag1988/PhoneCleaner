@@ -165,9 +165,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 binding.textViewEmpty.visibility = View.GONE
                 binding.recyclerView.visibility = View.VISIBLE
-                val adapter = MediaAdapter(files) { file ->
+                val adapter = MediaAdapter(files, { file ->
                     deleteFile(file)
-                } { hasSelection ->
+                }) { hasSelection ->
                     val currentAdapter = binding.recyclerView.adapter as? MediaAdapter
                     binding.buttonDeleteSelected.text = when {
                         hasSelection && currentAdapter?.isSelectionMode == true -> "Delete (${currentAdapter.getSelectedFiles().size})"
