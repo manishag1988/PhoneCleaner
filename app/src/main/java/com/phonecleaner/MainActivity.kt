@@ -8,6 +8,8 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.tabs.TabLayout
 import com.phonecleaner.adapter.MediaAdapter
 import com.phonecleaner.databinding.ActivityMainBinding
@@ -43,6 +45,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        binding.recyclerView.layoutManager = LinearLayoutManager(this)
+        binding.recyclerView.setHasFixedSize(true)
 
         fileScanner = FileScanner(contentResolver)
 
@@ -163,9 +168,10 @@ class MainActivity : AppCompatActivity() {
                 val adapter = MediaAdapter(files) { file ->
                     deleteFile(file)
                 } { hasSelection ->
+                    val currentAdapter = binding.recyclerView.adapter as? MediaAdapter
                     binding.buttonDeleteSelected.text = when {
-                        hasSelection && adapter.isSelectionMode -> "Delete (${adapter.getSelectedFiles().size})"
-                        adapter.isSelectionMode -> "Cancel"
+                        hasSelection && currentAdapter?.isSelectionMode == true -> "Delete (${currentAdapter.getSelectedFiles().size})"
+                        currentAdapter?.isSelectionMode == true -> "Cancel"
                         else -> "Select"
                     }
                 }
