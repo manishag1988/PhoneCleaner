@@ -5,8 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -25,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var fileScanner: FileScanner
     private var currentFiles: List<MediaFile> = emptyList()
+    private var pendingDeleteMessage: String? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -40,6 +43,18 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "Storage permission required", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private val deleteRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            Toast.makeText(this, pendingDeleteMessage ?: "Deleted", Toast.LENGTH_SHORT).show()
+            reloadCurrentFiles()
+        } else {
+            Toast.makeText(this, "Delete canceled", Toast.LENGTH_SHORT).show()
+        }
+        pendingDeleteMessage = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -197,33 +212,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun deleteFile(file: MediaFile) {
-        lifecycleScope.launch {
-            val deleted = withContext(Dispatchers.IO) {
-                try {
-                    val rows = contentResolver.delete(file.uri, null, null)
-                    rows > 0
-                } catch (e: Exception) {
-                    false
-                }
-            }
-
-            withContext(Dispatchers.Main) {
-                if (deleted) {
-                    Toast.makeText(this@MainActivity, "Deleted: ${file.displayName}", Toast.LENGTH_SHORT).show()
-                    val currentTab = binding.tabLayout.selectedTabPosition
-                    val filter = when (currentTab) {
-                        1 -> "gifs"
-                        2 -> "photos"
-                        3 -> "videos"
-                        else -> "all"
-                    }
-                    loadFiles(filter)
-                } else {
-                    Toast.makeText(this@MainActivity, "Failed to delete", Toast.LENGTH_SHORT).show()
-                }
-            }
+    private fun reloadCurrentFiles() {
+        val currentTab = binding.tabLayout.selectedTabPosition
+        val filter = when (currentTab) {
+            1 -> "gifs"
+            2 -> "photos"
+            3 -> "videos"
+            else -> "all"
         }
+        loadFiles(filter)
+    }
+
+    private fun deleteFile(file: MediaFile) {
+        deleteFiles(listOf(file), "Deleted: ${file.displayName}")
     }
 
     private fun deleteSelectedFiles() {
@@ -231,28 +232,42 @@ class MainActivity : AppCompatActivity() {
         val selected = adapter.getSelectedFiles()
         if (selected.isEmpty()) return
 
+        deleteFiles(selected, "Deleted ${selected.size} file(s)")
+    }
+
+    private fun deleteFiles(filesToDelete: List<MediaFile>, successMessage: String) {
+        if (filesToDelete.isEmpty()) return
+
+        pendingDeleteMessage = successMessage
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val deleteRequest = MediaStore.createDeleteRequest(contentResolver, filesToDelete.map { it.uri })
+            val senderRequest = IntentSenderRequest.Builder(deleteRequest.intentSender).build()
+            deleteRequestLauncher.launch(senderRequest)
+            return
+        }
+
         lifecycleScope.launch {
             var deletedCount = 0
             withContext(Dispatchers.IO) {
-                selected.forEach { file ->
+                filesToDelete.forEach { file ->
                     try {
                         if (contentResolver.delete(file.uri, null, null) > 0) {
                             deletedCount++
                         }
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         // failed
                     }
                 }
             }
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(
-                    this@MainActivity,
-                    "Deleted $deletedCount file(s)",
-                    Toast.LENGTH_SHORT
-                ).show()
-                adapter.toggleSelectionMode()
-                loadFiles("all")
+                if (deletedCount > 0) {
+                    Toast.makeText(this@MainActivity, successMessage, Toast.LENGTH_SHORT).show()
+                    reloadCurrentFiles()
+                } else {
+                    Toast.makeText(this@MainActivity, "Failed to delete", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
